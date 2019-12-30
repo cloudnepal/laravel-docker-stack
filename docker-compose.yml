@@ -1,0 +1,81 @@
+version: '3.7'
+
+services:
+
+    nginx:
+      image: docker-stack-nginx
+      container_name: "${APP_NAME}_nginx"
+      restart: always
+      volumes:
+        - .:/var/www/html:ro
+        - ./docker/nginx:/etc/nginx/conf.d/
+      depends_on:
+        - laravel
+      links:
+        - "laravel: ${APP_NAME}_laravel"
+      labels:
+        - "traefik.http.routers.${APP_NAME}.rule=Host(`${APP_NAME}.localhost`)"
+        - "traefik.http.services.${APP_NAME}.loadbalancer.server.port=80"
+        - "traefik.http.services.${APP_NAME}.loadbalancer.passhostheader=true"
+        - "traefik.enable=true"
+        - "traefik.docker.network=traefik_web"
+      networks:
+        - laravel
+        - traefik_web
+
+    laravel:
+      image: php-73:latest
+      container_name: "${APP_NAME}_laravel"
+      command: bash -c "/usr/bin/composer install --no-interaction --no-progress &&  "php-fpm &" && php -a"
+      expose:
+        - "9000"
+      volumes:
+        - .:/var/www/html
+        - ./docker/php/www.conf:/usr/local/etc/php-fpm.d/www.conf
+        - ./docker/php/php.ini:/usr/local/etc/php/php.ini
+        - $HOME/.composer:$HOME/.composer
+      external_links:
+        - "db:postgres_12"
+        - "redis: ${APP_NAME}_redis"
+      networks:
+        - laravel
+        - traefik_web
+        - postgres
+
+    supervisord:
+      image: php-73:latest
+      container_name: "${APP_NAME}_supervisord"
+      user: root
+      volumes:
+        - ./docker/php/supervisord.conf:/etc/supervisor/conf.d/supervisord.conf
+        - ./docker/php/cron:/var/spool/cron/crontabs/root
+        - .:/var/www/html
+      external_links:
+        - "db:postgres_12"
+        - "redis: ${APP_NAME}_redis"
+      networks:
+        - laravel
+        - postgres
+      command: ["/usr/bin/supervisord"]
+
+    redis:
+      image: redis:5.0.7-alpine3.11
+      container_name: "${APP_NAME}_redis"
+      expose:
+        - "6379"
+      volumes:
+        - ./docker/redis:/var/lib/redis
+      restart: always
+      networks:
+        - laravel
+        - traefik_web
+        
+networks:
+  laravel:
+    name: ${APP_NAME}
+  traefik_web:
+   external:
+     name: traefik_web
+  postgres:
+   external:
+     name: postgresql_12
